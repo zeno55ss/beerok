@@ -1,18 +1,14 @@
-name: RDP Bridge Keyholder
-on:
-  workflow_dispatch:  # Manual trigger ONLY (no cron!)
-
-jobs:
-  bridge:
-    runs-on: windows-latest
-    timeout-minutes: 360  # Max 6 hours (GitHub limit)
-    steps:
-      - name: 🔑 Configure RDP Settings
-        run: |
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v SecurityLayer /t REG_DWORD /d 0 /f
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
-
+- name: Create RDP User
+  shell: powershell
+  run: |
+    $runId = $env:GITHUB_RUN_ID
+    $prefix = "RDP_USER_"
+    $maxRunIdLength = 20 - $prefix.Length
+    $user = "${prefix}$($runId.Substring($runId.Length - $maxRunIdLength))"
+    
+    $password = ConvertTo-SecureString "P@ss1234" -AsPlainText -Force
+    New-LocalUser -Name $user -Password $password -FullName "RDP User" -Description "RDP User"
+    Add-LocalGroupMember -Group "Remote Desktop Users" -Member $user
       - name: 🌉 Establish Tailscale Tunnel
         env:
           TS_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
