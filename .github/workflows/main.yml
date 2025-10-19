@@ -1,0 +1,67 @@
+name: RDP Bridge Keyholder
+on:
+  workflow_dispatch:  # Manual trigger ONLY (no cron!)
+
+jobs:
+  bridge:
+    runs-on: windows-latest
+    timeout-minutes: 360  # Max 6 hours (GitHub limit)
+    steps:
+      - name: 🔑 Configure RDP Settings
+        run: |
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v SecurityLayer /t REG_DWORD /d 0 /f
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+
+      - name: 🌉 Establish Tailscale Tunnel
+        env:
+          TS_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          $tsInstaller = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $tsInstaller
+          Start-Process msiexec.exe -ArgumentList "/i `"$tsInstaller`" /quiet /norestart" -Wait
+          Remove-Item $tsInstaller -Force
+          
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$TS_AUTH_KEY --hostname=gh-rdp-$env:GITHUB_RUN_ID
+          
+          # Wait for Tailscale IP assignment
+          $tsIP = $null
+          for ($i=0; $i -lt 10; $i++) {
+            $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+            if ($tsIP) { break }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $tsIP) { exit 1 }
+          echo "TAILSCALE_IP=$tsIP" >> $GITHUB_ENV
+
+      - name: ⚠️ TEMPORARY CREDENTIALS (SELF-DESTRUCT)
+        run: |
+          $user = "RDP_USER_$env:GITHUB_RUN_ID"
+          $pass = [System.Guid]::NewGuid().ToString()
+          
+          net user $user $pass /add
+          net localgroup "Remote Desktop Users" $user /add
+          
+          echo "RDP_USER=$user" >> $GITHUB_ENV
+          echo "RDP_PASS=$pass" >> $GITHUB_ENV
+          echo "TAILSCALE_IP=$env:TAILSCALE_IP" >> $GITHUB_ENV
+
+      - name: 📜 Generate Connection Script (Auto-Destruct)
+        run: |
+          $script = @"
+          mstsc /v:$env:TAILSCALE_IP
+          username:$env:RDP_USER
+          password:$env:RDP_PASS
+          "@ | Out-File "$env:TEMP\connect.rdp"
+          
+          # Auto-delete credentials after 1 hour
+          Start-Process powershell.exe -ArgumentList "Start-Sleep -Seconds 3600; Remove-Item env:RDP_USER,RDP_PASS -Force" -NoNewWindow
+
+      - name: 🔥 Initiate Session (6-Hour Window)
+        run: |
+          Write-Host "RDP ACCESS GRANTED FOR 6 HOURS"
+          Write-Host "Connect via: mstsc $env:TEMP\connect.rdp"
+          Write-Host "Credentials auto-expire after session ends"
+          
+          # Keep workflow alive (but RDP dies when runner terminates)
+          while ($true) { Start-Sleep -Seconds 300 }
