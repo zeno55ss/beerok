@@ -31,7 +31,7 @@
 
       - name: ⚠️ TEMPORARY CREDENTIALS (SELF-DESTRUCT)
         run: |
-          $user = "RDP_USER_$env:GITHUB_RUN_ID"
+          $user = "RDP_USER"
           $pass = [System.Guid]::NewGuid().ToString()
           
           net user $user $pass /add
