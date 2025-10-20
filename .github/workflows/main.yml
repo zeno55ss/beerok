@@ -9,7 +9,6 @@
     $password = ConvertTo-SecureString "P@ss1234" -AsPlainText -Force
     New-LocalUser -Name $user -Password $password -FullName "RDP User" -Description "RDP User"
     Add-LocalGroupMember -Group "Remote Desktop Users" -Member $user
-      - name: 🌉 Establish Tailscale Tunnel
         env:
           TS_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
